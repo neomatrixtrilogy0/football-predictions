@@ -9,10 +9,10 @@ API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 
 app = Flask(__name__)
 
+# Stores predictions: {week: {player: {match_id: choice}}}
 predictions = {}
-results = {}
 
-# ----------- API FUNCTIONS ----------------
+# ---------------- API FUNCTIONS ----------------
 def get_matches(week):
     url = f"https://api.football-data.org/v4/competitions/PL/matches?season=2025&matchday={week}"
     headers = {"X-Auth-Token": API_KEY}
@@ -22,9 +22,6 @@ def get_matches(week):
     else:
         print("API error:", response.text)
         return []
-
-def parse_kickoff(kickoff_str):
-    return dt.datetime.fromisoformat(kickoff_str.replace("Z", "+00:00"))
 
 def get_outcome(match):
     if match["status"] == "FINISHED":
@@ -38,58 +35,35 @@ def get_outcome(match):
             return "TIE"
     return None
 
-# ----------- ROUTES ----------------
+# ---------------- ROUTES ----------------
 @app.route("/", methods=["GET", "POST"])
 def home():
     if request.method == "POST":
         week = int(request.form["week"])
-        player = request.form["player"]
-        predictions.setdefault(week, {}).setdefault(player, {})
-
-        # Save all predictions for selected week
-        for key, choice in request.form.items():
-            if key.startswith("match_"):
-                match_id = int(key.split("_")[1])
-                predictions[week][player][match_id] = choice
         return redirect(url_for("week_view", week=week))
-
     return render_template_string("""
     <html>
     <head>
         <title>Football Predictions 2025/26</title>
         <style>
             body { font-family: Arial, sans-serif; background: #f4f4f9; margin: 0; padding: 20px; }
-            h1, h2, h3 { text-align: center; }
+            h1, h2 { text-align: center; }
             select, button { padding: 8px 12px; margin: 5px; font-size: 16px; }
-            table { width: 60%; margin: 10px auto; border-collapse: collapse; background: #fff; }
-            th, td { padding: 8px; text-align: center; border: 1px solid #ccc; }
-            th { background: #007BFF; color: white; }
-            tr:nth-child(even) { background: #f2f2f2; }
-            form { text-align: center; margin-bottom: 30px; }
-            .match-select { margin-bottom: 15px; }
-            .container { max-width: 900px; margin: auto; }
+            .container { max-width: 600px; margin: auto; text-align: center; }
         </style>
     </head>
     <body>
         <div class="container">
-        <h1>Football Predictions 2025/26</h1>
-        <form method="post">
-            <label>Select Gameweek:</label>
-            <select name="week">
-                {% for w in range(1,39) %}
-                    <option value="{{ w }}">Gameweek {{ w }}</option>
-                {% endfor %}
-            </select>
-            <br>
-            <label>Select Player:</label>
-            <select name="player">
-                {% for p in ["Biniam A","Biniam G","Biniam E","Abel","Siem","Kubrom"] %}
-                    <option value="{{ p }}">{{ p }}</option>
-                {% endfor %}
-            </select>
-            <br><br>
-            <button type="submit">Continue</button>
-        </form>
+            <h1>Football Predictions 2025/26</h1>
+            <form method="post">
+                <label>Select Gameweek:</label>
+                <select name="week">
+                    {% for w in range(1,39) %}
+                        <option value="{{ w }}">Gameweek {{ w }}</option>
+                    {% endfor %}
+                </select><br><br>
+                <button type="submit">Go</button>
+            </form>
         </div>
     </body>
     </html>
@@ -101,12 +75,35 @@ def week_view(week):
 
     if request.method == "POST":
         player = request.form["player"]
-        predictions.setdefault(week, {}).setdefault(player, {})
+        predictions.setdefault(str(week), {}).setdefault(player, {})
         for key, choice in request.form.items():
             if key.startswith("match_"):
-                match_id = int(key.split("_")[1])
-                predictions[week][player][match_id] = choice
+                match_id = key.split("_")[1]
+                predictions[str(week)][player][match_id] = choice
         return redirect(url_for("week_view", week=week))
+
+    # -------- Calculate week scores ----------
+    week_scores = {}
+    for p, preds in predictions.get(str(week), {}).items():
+        points = 0
+        for match in matches:
+            match_id = str(match["id"])
+            outcome = get_outcome(match)
+            if outcome and preds.get(match_id) == outcome:
+                points += 1
+        week_scores[p] = points
+
+    # -------- Calculate accumulated scores ----------
+    accumulated_scores = {}
+    for w, week_data in predictions.items():
+        w_matches = get_matches(int(w))
+        for p, preds in week_data.items():
+            accumulated_scores.setdefault(p, 0)
+            for match in w_matches:
+                match_id = str(match["id"])
+                outcome = get_outcome(match)
+                if outcome and preds.get(match_id) == outcome:
+                    accumulated_scores[p] += 1
 
     return render_template_string("""
     <html>
@@ -114,14 +111,14 @@ def week_view(week):
         <title>Gameweek {{ week }}</title>
         <style>
             body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 20px; }
-            h1, h2, h3 { text-align: center; }
-            .container { max-width: 900px; margin: auto; }
-            table { width: 100%; border-collapse: collapse; margin: 20px 0; background: #fff; }
+            h1, h2 { text-align: center; }
+            table { width: 90%; margin: 20px auto; border-collapse: collapse; background: #fff; }
             th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
             th { background: #007BFF; color: white; }
             tr:nth-child(even) { background: #f2f2f2; }
-            form { text-align: center; margin-bottom: 20px; }
             select, button { padding: 8px 12px; font-size: 16px; margin: 5px; }
+            .container { max-width: 900px; margin: auto; }
+            form { text-align: center; }
         </style>
     </head>
     <body>
@@ -130,15 +127,12 @@ def week_view(week):
         <form method="post">
             <label>Select Player:</label>
             <select name="player">
-                {% for p in ["Player1","Player2","Player3","Player4","Player5","Player6"] %}
+                {% for p in ["Biniam A","Biniam G","Biniam E","Abel","Siem","Kubrom"] %}
                     <option value="{{ p }}">{{ p }}</option>
                 {% endfor %}
             </select>
             <table>
-                <tr>
-                    <th>Match</th>
-                    <th>Prediction</th>
-                </tr>
+                <tr><th>Match</th><th>Prediction</th></tr>
                 {% for m in matches %}
                 <tr>
                     <td>{{ m['homeTeam']['name'] }} vs {{ m['awayTeam']['name'] }}</td>
@@ -154,10 +148,30 @@ def week_view(week):
             </table>
             <button type="submit">Submit All Predictions</button>
         </form>
+
+        {% if week_scores %}
+        <h2>Week {{ week }} Results</h2>
+        <table>
+            <tr><th>Player</th><th>Points</th></tr>
+            {% for p, pts in week_scores.items() %}
+                <tr><td>{{ p }}</td><td>{{ pts }}</td></tr>
+            {% endfor %}
+        </table>
+        {% endif %}
+
+        {% if accumulated_scores %}
+        <h2>Accumulated Points</h2>
+        <table>
+            <tr><th>Player</th><th>Total Points</th></tr>
+            {% for p, pts in accumulated_scores.items() %}
+                <tr><td>{{ p }}</td><td>{{ pts }}</td></tr>
+            {% endfor %}
+        </table>
+        {% endif %}
         </div>
     </body>
     </html>
-    """, week=week, matches=matches)
+    """, week=week, matches=matches, week_scores=week_scores, accumulated_scores=accumulated_scores)
 
 if __name__ == "__main__":
     app.run(debug=True)

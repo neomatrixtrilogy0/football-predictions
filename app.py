@@ -1,13 +1,53 @@
 import os
-import datetime as dt
+import psycopg2
 import requests
 from flask import Flask, render_template_string, request, redirect, url_for
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 API_KEY = os.getenv("FOOTBALL_DATA_API_KEY")
 
 app = Flask(__name__)
+
+# --- Database setup ---
+DATABASE_URL = os.getenv("DATABASE_URL")  # you’ll paste Render Postgres URL in .env
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+def init_db():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # Players
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS players (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE
+    )
+    """)
+    # Predictions
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS predictions (
+        id SERIAL PRIMARY KEY,
+        player_id INTEGER REFERENCES players(id),
+        match_id INTEGER,
+        prediction TEXT,
+        week INTEGER,
+        UNIQUE(player_id, match_id)
+    )
+    """)
+    # Results
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS results (
+        match_id INTEGER PRIMARY KEY,
+        winner TEXT,
+        week INTEGER
+    )
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
 
 # Stores predictions: {week: {player: {match_id: choice}}}
 predictions = {}

@@ -1,9 +1,7 @@
 {% extends "base.html" %}
-
 {% block title %}Confirmation{% endblock %}
-
 {% block content %}
-<h2>✅ Predictions submitted successfully!</h2>
-<a href="/">🏠 Go to Home</a>
+<h2>✅ Your predictions for Gameweek {{ gameweek }} have been submitted!</h2>
+<a href="/">🏠 Back to Home</a>
 <a href="/results/{{ gameweek }}">📊 View Results</a>
 {% endblock %}

@@ -1,18 +1,16 @@
 {% extends "base.html" %}
-
-{% block title %}Home - Football Predictions{% endblock %}
-
+{% block title %}Home{% endblock %}
 {% block content %}
 <h1>⚽ Football Predictions</h1>
 <form method="POST" action="/gameweek">
-    <label for="player_id">Select Player:</label>
+    <label>Select Player:</label>
     <select name="player_id">
         {% for player in players %}
             <option value="{{ player }}">{{ player }}</option>
         {% endfor %}
     </select>
 
-    <label for="gameweek">Select Gameweek:</label>
+    <label>Select Gameweek:</label>
     <select name="gameweek">
         {% for gw in gameweeks %}
             <option value="{{ gw }}">Gameweek {{ gw }}</option>

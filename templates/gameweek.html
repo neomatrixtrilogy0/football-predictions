@@ -1,7 +1,5 @@
 {% extends "base.html" %}
-
-{% block title %}Gameweek {{ gameweek }} - Predictions{% endblock %}
-
+{% block title %}Gameweek {{ gameweek }}{% endblock %}
 {% block content %}
 <h2>Gameweek {{ gameweek }} - Predictions for {{ player_id }}</h2>
 
@@ -10,15 +8,15 @@
     <input type="hidden" name="gameweek" value="{{ gameweek }}">
 
     {% for match in matches %}
-        <label>{{ match['homeTeam'] }} vs {{ match['awayTeam'] }}</label>
-        <select name="prediction_{{ match['id'] }}">
-            <option value="home">{{ match['homeTeam'] }} wins</option>
-            <option value="away">{{ match['awayTeam'] }} wins</option>
-            <option value="draw">Tie</option>
+        <label>{{ match.home }} vs {{ match.away }}</label>
+        <select name="match_{{ match.id }}">
+            <option value="{{ match.home }}">{{ match.home }} wins</option>
+            <option value="{{ match.away }}">{{ match.away }} wins</option>
+            <option value="Tie">Tie</option>
         </select>
         <br>
     {% endfor %}
 
-    <button type="submit">Submit Predictions</button>
+    <button type="submit">Submit All Predictions</button>
 </form>
 {% endblock %}

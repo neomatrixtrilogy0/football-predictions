@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Results - Gameweek {{ gameweek }}{% endblock %}
+
+{% block content %}
+<h2>📊 Gameweek {{ gameweek }} Results</h2>
+
+<table>
+    <tr>
+        <th>Player</th>
+        <th>Points</th>
+    </tr>
+    {% for player, points in gameweek_points.items() %}
+    <tr>
+        <td>{{ player }}</td>
+        <td>{{ points }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+<h2>🏆 Total Accumulated Points</h2>
+<table>
+    <tr>
+        <th>Player</th>
+        <th>Total Points</th>
+    </tr>
+    {% for player, points in total_points.items() %}
+    <tr>
+        <td>{{ player }}</td>
+        <td>{{ points }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endblock %}

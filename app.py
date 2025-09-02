@@ -1,48 +1,38 @@
 import os
-import requests
+from flask import Flask, render_template, request, redirect, url_for
 import psycopg2
-from flask import Flask, render_template, request
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 app = Flask(__name__)
 
+# Database connection
 DATABASE_URL = os.getenv("DATABASE_URL")
-FOOTBALL_API_KEY = os.getenv("FOOTBALL_API_KEY")
-PLAYERS = ["Biniam A","Biniam G","Biniam E","Abel","Siem","Kubrom"]
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+cur = conn.cursor()
 
-HEADERS = {"X-Auth-Token": FOOTBALL_API_KEY}
+# Players
+players = ["Biniam A", "Biniam G", "Biniam E", "Abel", "Siem", "Kubrom"]
 
-def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode="require")
+# Gameweeks
+gameweeks = list(range(1, 39))
 
-# Initialize database table
-def init_db():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS predictions (
-            id SERIAL PRIMARY KEY,
-            player_id TEXT,
-            match_id TEXT,
-            gameweek INTEGER,
-            prediction TEXT,
-            UNIQUE(player_id, match_id)
-        )
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
+# API Key
+API_KEY = os.getenv("FOOTBALL_API_KEY")
+HEADERS = {"X-Auth-Token": API_KEY}
 
-init_db()
-
-# Fetch fixtures for a gameweek
+# ----------------------------
+# Utility functions
+# ----------------------------
 def fetch_fixtures(gameweek):
     url = f"https://api.football-data.org/v4/competitions/PL/matches?season=2025&matchday={gameweek}"
     r = requests.get(url, headers=HEADERS)
+    if r.status_code != 200:
+        return []
     data = r.json()
     matches = []
-    for m in data.get("matches", []):
+    for m in data["matches"]:
         matches.append({
             "id": m["id"],
             "home": m["homeTeam"]["name"],
@@ -50,29 +40,29 @@ def fetch_fixtures(gameweek):
         })
     return matches
 
-# Fetch results for a gameweek
 def fetch_results(gameweek):
     url = f"https://api.football-data.org/v4/competitions/PL/matches?season=2025&matchday={gameweek}"
     r = requests.get(url, headers=HEADERS)
+    if r.status_code != 200:
+        return {}
     data = r.json()
     results = {}
-    for m in data.get("matches", []):
-        if m["status"] == "FINISHED":
-            home = m["homeTeam"]["name"]
-            away = m["awayTeam"]["name"]
-            home_score = m["score"]["fullTime"]["home"]
-            away_score = m["score"]["fullTime"]["away"]
-            if home_score > away_score:
-                results[str(m["id"])] = home
-            elif away_score > home_score:
-                results[str(m["id"])] = away
-            else:
-                results[str(m["id"])] = "Tie"
+    for m in data["matches"]:
+        if m["score"]["winner"] == "HOME_TEAM":
+            winner = m["homeTeam"]["name"]
+        elif m["score"]["winner"] == "AWAY_TEAM":
+            winner = m["awayTeam"]["name"]
+        else:
+            winner = "Tie"
+        results[str(m["id"])] = winner
     return results
 
+# ----------------------------
+# Routes
+# ----------------------------
 @app.route("/")
 def index():
-    return render_template("index.html", players=PLAYERS, gameweeks=range(1,39))
+    return render_template("index.html", players=players, gameweeks=gameweeks)
 
 @app.route("/gameweek", methods=["POST"])
 def gameweek():
@@ -85,64 +75,46 @@ def gameweek():
 def submit_prediction():
     player_id = request.form["player_id"]
     gameweek = int(request.form["gameweek"])
-    conn = get_db_connection()
-    cur = conn.cursor()
-    for key, value in request.form.items():
+    predictions = {}
+    for key, val in request.form.items():
         if key.startswith("match_"):
-            match_id = key.split("_")[1]
-            cur.execute("""
-                INSERT INTO predictions (player_id, match_id, gameweek, prediction)
-                VALUES (%s,%s,%s,%s)
-                ON CONFLICT (player_id, match_id) DO UPDATE SET prediction=EXCLUDED.prediction
-            """, (player_id, match_id, gameweek, value))
+            predictions[key.replace("match_", "")] = val
+
+    # Insert/update predictions in DB
+    for match_id, pred in predictions.items():
+        cur.execute("""
+            INSERT INTO predictions (player_id, gameweek, match_id, prediction)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (player_id, gameweek, match_id) DO UPDATE
+            SET prediction = EXCLUDED.prediction
+        """, (player_id, gameweek, match_id, pred))
     conn.commit()
-    cur.close()
-    conn.close()
-    return render_template("confirmation.html", gameweek=gameweek)
+
+    # Redirect to confirmation page
+    return redirect(url_for("confirmation", player_id=player_id, gameweek=gameweek))
+
+@app.route("/confirmation/<player_id>/<int:gameweek>")
+def confirmation(player_id, gameweek):
+    return render_template("confirmation.html", player_id=player_id, gameweek=gameweek)
 
 @app.route("/results/<int:gameweek>")
 def results(gameweek):
-    conn = get_db_connection()
-    cur = conn.cursor()
+    results_dict = fetch_results(gameweek)
 
-    # Collect results for all gameweeks up to selected one
-    results_dict_all = {}
-    for gw in range(1, gameweek + 1):
-        gw_results = fetch_results(gw)
-        results_dict_all.update(gw_results)
-
-    # Results for selected gameweek
-    results_dict_current = fetch_results(gameweek)
-
-    # Gameweek points
-    gameweek_scores = []
-    for player in PLAYERS:
-        cur.execute("SELECT match_id,prediction FROM predictions WHERE player_id=%s AND gameweek=%s",
-                    (player, gameweek))
-        preds = cur.fetchall()
-        points = sum(1 for m, p in preds if str(m) in results_dict_current and results_dict_current[str(m)] == p)
-        gameweek_scores.append({"player": player, "points": points})
+    # Fetch predictions from DB
+    cur.execute("SELECT player_id, match_id, prediction FROM predictions WHERE gameweek=%s", (gameweek,))
+    rows = cur.fetchall()
+    gameweek_points = {p:0 for p in players}
+    for row in rows:
+        player, match_id, pred = row
+        correct = 1 if results_dict.get(str(match_id)) == pred else 0
+        gameweek_points[player] += correct
 
     # Accumulated points
-    accumulated_scores = []
-    for player in PLAYERS:
-        cur.execute("SELECT match_id,prediction FROM predictions WHERE player_id=%s", (player,))
-        preds = cur.fetchall()
-        points = sum(1 for m, p in preds if str(m) in results_dict_all and results_dict_all[str(m)] == p)
-        accumulated_scores.append({"player": player, "total": points})
+    cur.execute("SELECT player_id, SUM(points) FROM points GROUP BY player_id")
+    accumulated_points = dict(cur.fetchall())
 
-    cur.close()
-    conn.close()
-
-    gameweek_points = {row['player']: row['points'] for row in gameweek_scores}
-    total_points = {row['player']: row['total'] for row in accumulated_scores}
-
-    return render_template(
-        "results.html",
-        gameweek=gameweek,
-        gameweek_points=gameweek_points,
-        total_points=total_points
-    )
+    return render_template("results.html", gameweek=gameweek, gameweek_points=gameweek_points, accumulated_points=accumulated_points)
 
 if __name__ == "__main__":
     app.run(debug=True)
